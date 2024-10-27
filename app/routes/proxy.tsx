@@ -24,7 +24,7 @@ function rewriteUrls(htmlContent: string, baseUrl: string): string {
   });
 }
 
-// Loader function to handle proxy logic
+// Loader function using `fetch` to proxy requests
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const targetUrl = decodeURIComponent(url.searchParams.get("url") || "");
@@ -36,38 +36,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   console.log(`Proxying request to: ${targetUrl} from origin: ${origin}`);
 
-  return new Promise<Response>((resolve, reject) => {
-    _request(
-      {
-        url: targetUrl,
-        headers: { "User-Agent": BROWSER_USER_AGENT },
-        encoding: null, // Preserve binary content (images, etc.)
-      },
-      (error, response, body) => {
-        if (error) {
-          console.error("Error fetching target URL:", error);
-          reject(new Response("Error fetching content", { status: 500 }));
-        }
+  try {
+    const response = await fetch(targetUrl, {
+      headers: { "User-Agent": BROWSER_USER_AGENT },
+    });
 
-        const contentType = response.headers["content-type"];
-        if (contentType && contentType.includes("text/html")) {
-          const htmlBody = body.toString();
-          const rewrittenHtml = rewriteUrls(htmlBody, targetUrl);
-          resolve(
-            new Response(rewrittenHtml, {
-              status: response.statusCode,
-              headers: { "Content-Type": "text/html" },
-            })
-          );
-        } else {
-          resolve(
-            new Response(body, {
-              status: response.statusCode,
-              headers: { "Content-Type": contentType! },
-            })
-          );
-        }
-      }
-    );
-  });
+    const contentType = response.headers.get("content-type") || "";
+
+    if (contentType.includes("text/html")) {
+      const htmlBody = await response.text();
+      const rewrittenHtml = rewriteUrls(htmlBody, targetUrl);
+      return new Response(rewrittenHtml, {
+        status: response.status,
+        headers: { "Content-Type": "text/html" },
+      });
+    } else {
+      const body = await response.arrayBuffer(); // Handle binary data
+      return new Response(body, {
+        status: response.status,
+        headers: { "Content-Type": contentType },
+      });
+    }
+  } catch (error) {
+    console.error("Error fetching target URL:", error);
+    return new Response("Error fetching content", { status: 500 });
+  }
 };
